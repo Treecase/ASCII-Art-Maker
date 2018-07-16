@@ -1,97 +1,107 @@
-
+/*
+ * ASCII art maker utility functions
+ *
+ */
 
 #include "util.h"
 
 
 
-/* darkness: get the "darkness" (ie greyscale value) of some pixel */
-uint8_t darkness (uint32_t pixel, SDL_PixelFormat *f) {
+#define LEN(arr)    (sizeof(arr)/sizeof(*arr))
 
-    uint8_t r,g,b;
-    SDL_GetRGB (pixel, f, &r,&g,&b);
+
+unsigned min_alpha = 255;
+
+
+
+/* darkness: get the `darkness' (ie greyscale value) of some pixel */
+Uint8 darkness (Uint32 pixel, SDL_PixelFormat *f) {
+
+    Uint8 r, g, b;
+    SDL_GetRGB (pixel, f, &r, &g, &b);
 
     return (r + g + b) / 3;
 }
 
 /* get_char: get the ASCII char for some pixel */
-char get_char (uint32_t pixel, SDL_PixelFormat *f, char invert) {
+char get_char (Uint32 pixel, SDL_PixelFormat *f, bool invert) {
 
-    const static int max = sizeof(ascii_ch);
-    int transparency = f->Amask? (pixel & f->Amask) >> 24 : 255;
+    static const int max = LEN(ascii_ch) - 1;
 
-    int adj = transparency / max;
-    if (!adj)
-        return max-1;
 
-    int r = darkness (pixel, f) / adj;
+    Uint8 alpha = 255;
+    if (f->Amask != 0) {
+        alpha = ((pixel & f->Amask) >> f->Ashift) << f->Aloss;
+        if (alpha < min_alpha)
+            return ' ';
+    }
 
-    if (r >= max)
-        r = max-1;
-    else if (r < 0)
+    int r;
+    int dark = darkness (pixel, f);
+    if (dark == 0)
         r = 0;
+    else if (alpha >= dark)
+        r = (double)max / ((double)alpha / (double)dark);
+    else
+        r = max;
 
-    return ascii_ch[invert? (max-1) - r : r];
+    return ascii_ch[invert? max - r : r];
 }
 
-/* get_block: read a block of pixels from the image,
-    returns the average colour of the block */
-uint32_t get_block (SDL_Surface *img, int x, int y, int w, int h) {
+/* area_avgcolour: get the average colour of an area in the image */
+Uint32 area_avgcolour (SDL_Surface *img, int x, int y, int w, int h) {
 
-    uint8_t  r,g,b,a;
-    unsigned long r_avg,g_avg,b_avg,a_avg;
+    Uint8         col[4] = { 0,0,0,0 };
+    unsigned long avg[4] = { 0,0,0,0 };
 
-    r_avg = g_avg = b_avg = 0;
-
-    for (int i = 0; i < w; i += (w/5)? w/5 : 1)
-        for (int j = 0; j < h; j += (h/5)? h/5 : 1) {
-            SDL_GetRGBA (get_pixel (img, x+i, y+j),
-                img->format, &r,&g,&b,&a);
-            r_avg += r;
-            g_avg += g;
-            b_avg += b;
-            a_avg += a;
+    for (int i = 0; i < w; ++i)
+        for (int j = 0; j < h; ++j) {
+            SDL_GetRGBA (get_pixel (img, x, y),
+                         img->format,
+                         &col[0], &col[1],
+                         &col[2], &col[3]);
+            for (int n = 0; n < 4; ++n)
+                avg[n] += col[n];
         }
-    r_avg /= w*h;
-    g_avg /= w*h;
-    b_avg /= w*h;
-    a_avg /= w*h;
+    for (int n = 0; n < 4; ++n)
+        avg[n] /= w * h;
 
-    return SDL_MapRGBA (img->format, r,g,b,a);
+    /* map colour to 4-byte int */
+    return SDL_MapRGBA (img->format, (Uint8)avg[0], (Uint8)avg[1], (Uint8)avg[2], (Uint8)avg[3]);
 }
 
-/* get_pixel: returns the pixel in surface at x,y */
-uint32_t get_pixel (SDL_Surface *surface, int x, int y) {
+/* get_pixel: get pixel in surface at x,y */
+Uint32 get_pixel (SDL_Surface *surface, int x, int y) {
 
     if (x < 0 || x >= surface->w || y < 0 || y >= surface->h)
         return 0;
 
-    int bpp = surface->format->BytesPerPixel;
-    Uint8 *p = (Uint8 *)surface->pixels + y *
-                surface->pitch + x * bpp;
+    int    bpp = surface->format->BytesPerPixel;
 
     switch(bpp) {
-
     /* 8 bit */
     case 1:
-        return *p;
+        return *(Uint8 *)(surface->pixels + y * surface->pitch  + x * bpp);
         break;
 
     /* 16 bit */
     case 2:
-        return *(Uint16 *)p;
+        return *(Uint16 *)(surface->pixels + y * surface->pitch  + x * bpp);
         break;
 
     /* 24 bit */
     case 3:
+      { Uint8 *p   = (Uint8 *)surface->pixels + y *
+                          surface->pitch  + x * bpp;
         if (SDL_BYTEORDER == SDL_BIG_ENDIAN)
             return p[0] << 16 | p[1] << 8 | p[2];
         else
             return p[0] | p[1] << 8 | p[2] << 16;
-        break;
+      } break;
 
     /* 32 bit */
     case 4:
-        return *(Uint32 *)p;
+        return *(Uint32 *)(surface->pixels + y * surface->pitch  + x * bpp);
         break;
 
     /* never happens */

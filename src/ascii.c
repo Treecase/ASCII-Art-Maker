@@ -1,155 +1,166 @@
-
-
-#include <stdio.h>
-#include <errno.h>
-#include <SDL2/SDL_image.h>
+/*
+ * image to ASCII art converter
+ *
+ */
 
 #include "util.h"
 
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <SDL2/SDL_image.h> /* TODO: switch to a proper image loading lib instead of SDL2 */
+
+#include <getopt.h>
 
 
-void printusage (char *name, char help);
+
+static const char *OPTSTRING = "is:a:";
+static const struct option LONGOPTS[] =
+    {   { "invert",       no_argument, NULL, 'i' },
+        { "size",   required_argument, NULL, 's' },
+        { "alpha",  required_argument, NULL, 'a' },
+        { "help",         no_argument, NULL, 'h' },
+        { NULL,           no_argument, NULL,  0  }
+    };
+
+
+const char *pname;
+
+enum usagemode {
+    USAGE_HELP,
+    USAGE_ERROR
+};
+void print_usage (enum usagemode mode);
 
 
 
 /* ascii: creates ASCII art images from bitmaps */
 int main (int argc, char *argv[]) {
 
+    pname = argv[0];
 
-    atexit (IMG_Quit);
 
+    char FLAG_invert = 0;
 
-    char FLAG_invert;
+    char *filename = NULL;
 
-    char *filename;
-    int x_step, y_step;
-    int out_width;
+    double x_step,
+           y_step;
+    int out_width = 0;
 
     SDL_Surface *img;
 
 
-    /* handle args */
-    filename = NULL;
-    FLAG_invert = out_width = 0;
+    /* command-line options */
+    int opt;
+    while ((opt = getopt_long (argc, argv, OPTSTRING, LONGOPTS, NULL)) != -1) {
+        switch (opt) {
+        /* -i : invert darkness values */
+        case 'i':
+            FLAG_invert = 1;
+            break;
 
-    if (argc <= 1)
-        printusage (argv[0], 0);
+        /* -s : lock to a specific size */
+        case 's':
+          { char *end;
+            errno = 0;
+            out_width = strtol (optarg, &end, 0);
+            if (errno != 0)                     fatal ("%s - %s", optarg, strerror (errno));
+            if (!(*end == 0 && *optarg != 0))   fatal ("'%s' is not a number", optarg);
+          } break;
 
-    for (int i = 1, skip = 0; i < argc; ++i, skip = 0) {
-        if (argv[i][0] == '-') {
-            for (int j = 1; j < strlen (argv[i]); ++j)
-                switch (argv[i][j]) {
+        /* -a : set the minimum alpha before the pixel is ignored */
+        case 'a':
+          { char *end;
+            errno = 0;
+            min_alpha = strtol (optarg, &end, 0);
+            if (errno != 0)                     fatal ("%s - %s", optarg, strerror (errno));
+            if (!(*end == 0 && *optarg != 0))   fatal ("'%s' is not a number", optarg);
+          } break;
 
-                /* long style options*/
-                case '-':
-                    if (!strcmp (argv[i], "--help"))
-                        printusage (argv[0], 1);
-                    else if (!strcmp (argv[i], "--invert"))
-                        FLAG_invert = 1;
-                    else if (!strcmp (argv[i], "--size")) {
-                        if (i+1 >= argc)
-                            fatal ("incorrect size option!\n");
-                        out_width = atoi (argv[i+1]);
-                        skip = 1;
-                    }
-                    j = strlen (argv[i]);
-                    break;
+        /* -h : print help */
+        case 'h':
+            print_usage (USAGE_HELP);
+            break;
 
-                /* -i : invert darkness values */
-                case 'i':
-                    FLAG_invert = 1;
-                    break;
+        /* unknown arg */
+        case '?':
+            print_usage (USAGE_ERROR);
+            break;
 
-                /* -s : lock to a specific size */
-                case 's':
-                    if (i+1 >= argc)
-                        fatal ("incorrect size option!\n");
-                    out_width = atoi (argv[i+1]);
-                    skip = 1;
-                    break;
-
-                /* -h : print help */
-                case 'h':
-                    printusage (argv[0], 1);
-                    break;
-
-                /* unknown option */
-                default:
-                    error ("unknown option '-%c'\n", argv[i][j]);
-                    break;
-                }
+        default:
+            print_usage (USAGE_ERROR);
+            break;
         }
-        else {
-            if (!filename)
-                filename = argv[i];
-            else
-                error ("unknown argument '%s'\n", argv[i]);
-        }
-        i += skip;
     }
+
+    /* get filename */
+    if (optind < argc)
+        filename = argv[optind];
+    else
+        fatal ("no filename supplied!");
 
 
     /* verify file exists/was supplied */
-    if (filename) {
-        FILE *t = fopen (filename, "r");
-        if (!t) {
-            fatal ("Failed to open '%s' (%s)\n", filename, strerror (errno));
-            exit (1);
-        }
-        fclose (t);
-    }
-    else
-        fatal ("no filename supplied!\n");
+    FILE *t = fopen (filename, "r");
+    if (!t)
+        fatal ("Failed to open '%s' (%s)", filename, strerror (errno));
+    fclose (t);
 
 
     /* load image */
-    IMG_Init (IMG_INIT_PNG | IMG_INIT_JPG | IMG_INIT_TIF);
+    IMG_Init (IMG_INIT_PNG);
+    atexit (IMG_Quit);
 
     img = IMG_Load (filename);
     if (!img)
-        fatal ("failed to load image '%s'! (%s)\n", filename, IMG_GetError());
+        fatal ("failed to load image '%s'! (%s)", filename, IMG_GetError());
 
 
-    /* decide the output width (if not supplied) */
-    if (!out_width || out_width < 0) {
-        if (img->w > 80)
-            out_width = 80;
-        else
-            out_width = img->w;
-    }
-    if (out_width > img->w)
-        out_width = img->w;
+    /* set the output width */
+    if (out_width <= 0)
+        out_width = (img->w > 80)? 80 : img->w;
 
-    /* create image from ASCII */
-    int temp = img->w / out_width;
+
+    /* set x/y step */
+    double temp = (double)img->w / (double)out_width;
     x_step = temp? temp : 1;
     y_step = 2 * x_step;
 
-    for (int y = 0; y < img->h; y += y_step) {
-        for (int x = 0; x < img->w; x += x_step)
-            putchar (get_char (get_block (img, x,y, x_step,x_step),
-                img->format, FLAG_invert));
+
+    /* create ASCII image */
+    for (double y = 0; y < img->h; y += y_step) {
+        for (double x = 0; x < img->w; x += x_step)
+            putchar (get_char (area_avgcolour (img,
+                                          x,y,
+                                          x_step,x_step),
+                               img->format,
+                               FLAG_invert));
         putchar ('\n');
     }
-
-
-    /* IMG_Quit is called automatically by atexit */
-    return 0;
+    return EXIT_SUCCESS;
 }
 
-/* printusage: print usage information */
-void printusage (char *name, char help) {
 
-    printf ("Usage: %s [OPTION]... IMAGE\n", name);
-    puts   ("Try '%s --help' for more information.");
 
-    if (help) {
-        putchar ('\n');
-        puts ("  -i, --invert                  invert the colours");
-        puts ("  -s, --size                    set the size of the output in characters");
-        puts ("  -h, --help                    print this help");
-        putchar ('\n');
+/* print_usage: print usage information */
+void print_usage (enum usagemode mode) {
+
+    if (mode == USAGE_HELP) {
+
+        printf ("Usage: %s [OPTION]... IMAGE\n", pname);
+        printf ("Convert IMAGE to ASCII art\n\n"      );
+
+        puts ("  -i, --invert              invert the colours, eg for white-on-black display");
+        puts ("  -s, --size SIZE           set the size of the output in characters"         );
+        puts ("  -a, --alpha ALPHA         set the minimum alpha for a pixel to be ignored"  );
+        puts ("      --help                display this help and exit\n"                     );
     }
-    exit (0);
+    else if (mode == USAGE_ERROR) {
+        fprintf (stderr, "Usage: %s [OPTION]... IMAGE\n"          , pname);
+        fprintf (stderr, "Try '%s --help' for more information.\n", pname);
+        exit (EXIT_FAILURE);
+    }
+    exit (EXIT_SUCCESS);
 }
 
