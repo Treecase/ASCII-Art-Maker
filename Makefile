@@ -1,21 +1,21 @@
 
-
 CC=gcc
+
 OUTNAME=ascii-art
-OPTIONS=-Wall -Wextra -ggdb -g
+OPTIONS=-Wall -Wextra -ggdb -g -Og
 
-SRC=$(addprefix src/, $(addsuffix .c, ascii util))
-HDR=$(addprefix src/, $(addsuffix .h, util))
+_SRC=ascii util
+SRC=$(addprefix src/, $(addsuffix .c, $(_SRC)))
+_HDR=util
+HDR=$(addprefix src/, $(addsuffix .h, $(_HDR)))
 
-LIBS=SDL2 SDL2_image
+_LIBS=SDL2 SDL2_image
+LIBS=$(addprefix -l, $(_LIBS))
 
 
 $(OUTNAME) : $(SRC) $(HDR) Makefile
-	$(CC) src/*.c $(addprefix -l, $(LIBS)) -o $(OUTNAME) $(OPTIONS)
+	$(CC) $(SRC) $(LIBS) -o $(OUTNAME) $(OPTIONS)
 
 clean :
-	@if [ -f $(OUTNAME) ]; then\
-	    rm $(OUTNAME);\
-            echo "Removed $(OUTNAME)";\
-	fi
+	rm $(OUTNAME);
 

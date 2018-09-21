@@ -1,5 +1,7 @@
-
-
+/*
+ * Utility functions for ASCII-art converter
+ *
+ */
 
 #ifndef _UTIL_H
 #define _UTIL_H
@@ -13,10 +15,13 @@
 #define error(format, ...)  ({  fprintf (stderr, "Error: " format "\n", ##__VA_ARGS__);   })
 #define fatal(format, ...)  ({  error(format, ##__VA_ARGS__); exit (EXIT_FAILURE);  })
 
+
+
 /* defined in util.c */
 extern unsigned min_alpha;
 
 /* characters to use, in order lightest to darkest */
+/* TODO: add configurable character map */
 static const char ascii_ch[] = {    'M','B','R','X','Y',
                                     'V','I','t','i','+',
                                     ';',':',',','.',' '
